@@ -1,13 +1,11 @@
 from json.decoder import JSONDecodeError
 from typing import Any, List
-import requests
-import asyncio
-# noinspection PyPackageRequirements
 import telegram
 import json
 import redis
 import time
 
+VERSION = 'v0.2'
 
 def _on_live(data):
     print(data)
@@ -43,13 +41,14 @@ def handle_ws(message):
     except JSONDecodeError as e:
         print(f'解析 json 時出現錯誤: {e}')
 
-def initRedis(host: str = "127.0.0.1", port: int = 6379, database: int = 0):
-    return redis.Redis(host, port, database)
+def initRedis(host: str = "127.0.0.1", port: int = 6379, database: int = 0, password: str = None):
+    return redis.Redis(host, port, database, password)
 
 
 def startRooms(rooms: List[int], redis_info: Any):
     try:
-        rc = initRedis(redis_info['host'], redis_info['port'], redis_info['database'])
+        password = redis_info['password'] if 'password' in redis_info and redis_info['password'] else None
+        rc = initRedis(redis_info['host'], redis_info['port'], redis_info['database'], password)
         pubsub = rc.pubsub()
         room_subscribed = {}
         for room in rooms:
@@ -69,6 +68,7 @@ def startRooms(rooms: List[int], redis_info: Any):
 
 
 if __name__ == '__main__':
+    print(f'bili-live-notify {VERSION} 正在啟動...')
     f = open('./settings/config.json')
     data = json.load(f)
     listen_room = data['rooms']

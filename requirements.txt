@@ -1,6 +1,3 @@
-requests
-aiohttp
-enum34
 typing
 python-telegram-bot
 redis
