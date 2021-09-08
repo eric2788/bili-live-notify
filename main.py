@@ -9,7 +9,7 @@ import redis
 import time
 
 
-async def _on_live(data):
+def _on_live(data):
     print(data)
     user_cover = data['cover']
     bilibili_uid = data['uid']
