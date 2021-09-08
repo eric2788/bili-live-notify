@@ -1,89 +1,68 @@
+from json.decoder import JSONDecodeError
+from typing import Any, List
 import requests
 import asyncio
 # noinspection PyPackageRequirements
 import telegram
-
-from blivedm import BLiveClient
 import json
+import redis
+import time
 
 
-class Spider(BLiveClient):
+async def _on_live(data):
+    print(data)
+    user_cover = data['cover']
+    bilibili_uid = data['uid']
+    title = data['title']
+    room_id = data['room']
+    name = data['name']
 
-    def __init__(self, room_id: int, userId: int, name: str = None): # name can make custom
-        super().__init__(room_id)
-        self.title = None
-        self.bilibili_uid = 0
-        self.user_cover = None
-        self.name = name
-        self.r1 = None
-        self.userId = userId
+    print(f'正在發送 {name} 的開播通知: {room_id}, 標題: {title}')
 
-    def get_live_info(self):
-        r = requests.get('https://api.live.bilibili.com/room/v1/Room/get_info?room_id=%s' % self.room_id,
-                         headers={
-                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                                           'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36'})
-
-        if r.status_code == 200:
-            data = r.json()['data']
-            self.title = data['title']
-            self.bilibili_uid = data['uid']
-            self.user_cover = data['user_cover']
-            return data
-
-    def get_user_info(self):
-        r = requests.get('https://api.bilibili.com/x/space/acc/info?mid=%s&jsonp=jsonp' % self.bilibili_uid,
-                           headers={
-                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                                           'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36'})
-        if r.status_code == 200:
-            data = r.json()['data']
-            self.name = data['name']
+    caption = '<a href="https://space.bilibili.com/' + \
+        str(bilibili_uid) + '">' + name + '</a> 正在直播\n'
+    caption += '标题： ' + title + '\n'
+    reply_markup = telegram.InlineKeyboardMarkup(
+        [[telegram.InlineKeyboardButton('直播间', url='https://live.bilibili.com/' + str(room_id))]])
+    if len(user_cover) > 0:
+        bot.sendPhoto(userId, user_cover, caption=caption, parse_mode='html',
+                                reply_markup=reply_markup)
+    else:
+        bot.send_message(
+            userId, caption, parse_mode='html', reply_markup=reply_markup)
 
 
-    _COMMAND_HANDLERS = BLiveClient._COMMAND_HANDLERS.copy()
+def handle_ws(message):
+    try:
+        info = message['data'].decode('utf-8')
+        data = json.loads(info)
+        if data['command'] == "LIVE":
+            _on_live(data['data'])
+    except redis.exceptions.ConnectionError as e:
+        print(f'解析 redis 時出現錯誤: {e}')
+    except JSONDecodeError as e:
+        print(f'解析 json 時出現錯誤: {e}')
 
-    async def _on_live(self, command):
-        print(command)
-        if self.live_status:
-            return
-        self.get_live_info()
-        if not self.name:
-            self.get_user_info()
-        self.live_status = True
-        caption = '<a href="https://space.bilibili.com/' + str(self.bilibili_uid) + '">' + self.name + '</a> 正在直播\n'
-        caption += '标题： ' + self.title + '\n'
-        reply_markup = telegram.InlineKeyboardMarkup(
-            [[telegram.InlineKeyboardButton('直播间', url='https://live.bilibili.com/' + str(self.room_id))]])
-        if len(self.user_cover) > 0:
-            self.r1 = bot.sendPhoto(self.userId, self.user_cover, caption=caption, parse_mode='html',
-                                    reply_markup=reply_markup)
-            bot.pinChatMessage(self.userId, self.r1.message_id)
-        else:
-            self.r1 = bot.send_message(self.userId, caption, parse_mode='html', reply_markup=reply_markup)
-            bot.pinChatMessage(self.userId, self.r1.message_id, True)
-
-    async def _on_prepare(self, command):
-        _ = command
-        self.live_status = False
-        print('%d 准备中' % self.room_id)
-        if self.r1:
-            bot.unpin_chat_message(self.userId, api_kwargs=dict(message_id=self.r1.message_id))
-
-    # noinspection PyTypeChecker
-    _COMMAND_HANDLERS['LIVE'] = _on_live
-    # noinspection PyTypeChecker
-    _COMMAND_HANDLERS['PREPARING'] = _on_prepare
+def initRedis(host: str = "127.0.0.1", port: int = 6379, database: int = 0):
+    return redis.Redis(host, port, database)
 
 
-async def start(rooms: list, data):
-    for room in rooms:
-        print('add room' + str(room))
-        task = Spider(room, int(data['toUser']))
-        await task.init_room()
-        task.start()
-    while True:
-        await asyncio.sleep(1)
+def startRooms(rooms: List[int], redis_info: Any):
+    try:
+        rc = initRedis(redis_info['host'], redis_info['port'], redis_info['database'])
+        pubsub = rc.pubsub()
+        room_subscribed = {}
+        for room in rooms:
+            print('add room' + str(room))
+            room_subscribed[f'blive:{room}'] = handle_ws
+        pubsub.subscribe(**room_subscribed)
+        t = pubsub.run_in_thread(sleep_time=0.1)
+    except redis.exceptions.ConnectionError as e:
+        print(f'初始化 redis 時出現錯誤, 等待五秒重啟: {e}')
+        try:
+            time.sleep(5)
+        except KeyboardInterrupt:
+            print(f'等待被手動中止')
 
 
 if __name__ == '__main__':
@@ -91,6 +70,11 @@ if __name__ == '__main__':
     data = json.load(f)
     listen_room = data['rooms']
     token = data['token']
+    global bot, userId
+    userId = int(data['toUser'])
     bot = telegram.Bot(token=token)
+    redis_info = data['redis']
+    startRooms(listen_room, redis_info)
+    
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(start(listen_room, data))
+    loop.run_until_complete(start(listen_room))
