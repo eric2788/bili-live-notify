@@ -53,7 +53,7 @@ def startRooms(rooms: List[int], redis_info: Any):
         pubsub = rc.pubsub()
         room_subscribed = {}
         for room in rooms:
-            print('add room' + str(room))
+            print(f'正在請求監聽房間 {room}')
             room_subscribed[f'blive:{room}'] = handle_ws
         pubsub.subscribe(**room_subscribed)
         pubsub.run_in_thread(sleep_time=0.1)
