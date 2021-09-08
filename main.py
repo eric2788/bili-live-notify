@@ -56,7 +56,7 @@ def startRooms(rooms: List[int], redis_info: Any):
             print('add room' + str(room))
             room_subscribed[f'blive:{room}'] = handle_ws
         pubsub.subscribe(**room_subscribed)
-        t = pubsub.run_in_thread(sleep_time=0.1)
+        pubsub.run_in_thread(sleep_time=0.1)
     except redis.exceptions.ConnectionError as e:
         print(f'初始化 redis 時出現錯誤, 等待五秒重啟: {e}')
         try:
@@ -75,6 +75,3 @@ if __name__ == '__main__':
     bot = telegram.Bot(token=token)
     redis_info = data['redis']
     startRooms(listen_room, redis_info)
-    
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start(listen_room))
