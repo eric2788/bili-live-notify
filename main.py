@@ -12,7 +12,7 @@ def _on_live(data):
     user_cover = data['cover']
     bilibili_uid = data['uid']
     title = data['title']
-    room_id = data['room']
+    room_id = data['room_id']
     name = data['name']
 
     print(f'正在發送 {name} 的開播通知: {room_id}, 標題: {title}')
@@ -35,7 +35,7 @@ def handle_ws(message):
         info = message['data'].decode('utf-8')
         data = json.loads(info)
         if data['command'] == "LIVE":
-            _on_live(data['data'])
+            _on_live(data['live_info'])
     except redis.exceptions.ConnectionError as e:
         print(f'解析 redis 時出現錯誤: {e}')
     except JSONDecodeError as e:
@@ -58,13 +58,8 @@ def startRooms(rooms: List[int], redis_info: Any):
         pubsub.run_in_thread(sleep_time=0.1)
     except redis.exceptions.ConnectionError as e:
         print(f'初始化 redis 時出現錯誤, 等待五秒重啟: {e}')
-        try:
-            time.sleep(5)
-        except KeyboardInterrupt:
-            print(f'等待被手動中止')
-    except KeyboardInterrupt:
-        print(f'程序正在關閉')
-        exit()
+        time.sleep(5)
+        startRooms(rooms, redis_info)
 
 
 if __name__ == '__main__':
